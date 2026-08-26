@@ -16,44 +16,43 @@ KDIC 웹사이트의 FAQ·안내문·표·첨부파일을 구조를 유지한 �
 
 ```mermaid
 flowchart TD
-    Q([사용자 질문]) --> G1{Gate 1<br/>규칙 기반 필터}
-    G1 -->|EXIT| X1[인사 · 노이즈 · 욕설<br/>보안 우회 · 고정 응답]
-    G1 --> RW[질의 정리<br/>문맥 재작성 + 업무 되묻기 판정]
-    RW -->|업무 불명확| X2[업무 선택 요청]
-    RW --> CA{질의 캐시}
-    CA -->|적중| X3[저장된 답변]
-    CA --> G2{Gate 2<br/>임베딩 도메인 필터}
-    G2 -->|EXIT| X4[범위 밖 · 인젝션<br/>고정 응답]
-    G2 --> PL[쿼리 플래너<br/>복합 질문 분해 + intent 판정]
+    Q([사용자 질문<br/>POST /api/chat · SSE]) --> G1{① Gate 1<br/>규칙 기반 필터 · LLM 0}
+    G1 -->|EXIT| X1[인사 · 노이즈 · 욕설 · 보안 우회<br/>고정 응답]
+    G1 -->|CONTINUE| RW[② 질의 정리 — LLM 1콜<br/>문맥 재작성 + 업무 되묻기 판정]
+    RW -->|업무 불명확| X2[업무 선택 요청<br/>선택 버튼 6종]
+    RW --> CA{③ 질의 캐시<br/>키 = 재작성문 · 24h}
+    CA -->|적중| X3[저장된 답변 재사용]
+    CA -->|미스| G2{④ Gate 2<br/>임베딩 도메인 필터 · LLM 0}
+    G2 -->|EXIT| X4[범위 밖 · 인젝션 · 개인정보<br/>고정 응답]
+    G2 -->|CONTINUE| PL[⑤ 쿼리 플래너 — LLM 1콜<br/>복합 질문 분해 + intent 판정]
 
-    subgraph SUB["하위 질문마다 반복"]
-        RT[Dense 검색<br/>pgvector · 후보 20개]
-        RT --> G3{Gate 3<br/>검색 관련성}
-        G3 -->|top-1 점수 미달| X5[근거 없음 안내<br/>생성 LLM 미호출]
-        G3 --> TK[최종 근거 5개]
-        TK --> GEN[프롬프트 조립<br/>HyperCLOVA X 스트리밍]
-        GEN --> VF[근거 사용 · 답변 적절성 검증<br/>미달 시 1회 재생성]
+    subgraph SUB["하위 질문마다 ⑥~⑨ 반복"]
+        RT[⑥ Dense 검색<br/>pgvector · bge-m3-ko · 후보 20]
+        RT --> G3{⑦ Gate 3<br/>검색 관련성 · top-1 임계값}
+        G3 -->|EXIT| X5[근거 없음 안내<br/>생성 모델 미호출]
+        G3 -->|통과| TK[최종 근거 5개]
+        TK --> BR{intent}
+        BR -->|민원| CIV[민원 프롬프트<br/>절차 · 서류 · 신청링크 조립]
+        BR -->|정보성| INF[정보성 프롬프트]
+        CIV --> GEN[⑧ 답변 생성<br/>HyperCLOVA X 스트리밍]
+        INF --> GEN
+        GEN --> VF[⑨ 사후 검증 — LLM 1콜<br/>근거 사용 · 답변 적절성]
+        VF -->|미달 + 근거 있음| RG[재생성 1회 → 재검증]
+        VF --> AT[출처 · 서류 · 신청링크 부착<br/>색인 데이터 기준 결정론적]
+        RG --> AT
+        AT --> ST[본문 URL 제거]
     end
 
     PL --> RT
-    VF --> OG{출력 가드레일}
-    OG -->|금칙어 적중| X6[고정 거절로 교체]
-    OG --> D([답변 · 출처 · 첨부])
-
-    classDef io fill:#E8F1FF,stroke:#4C82D8,color:#17365D,stroke-width:2px;
-    classDef gate fill:#FFF0D9,stroke:#D9822B,color:#6B3800,stroke-width:2px;
-    classDef llm fill:#F0E8FF,stroke:#7D5AC8,color:#34205F,stroke-width:2px;
-    classDef search fill:#E4F7EC,stroke:#2F9B61,color:#163C29,stroke-width:2px;
-    classDef stop fill:#F2F3F5,stroke:#8B909A,color:#3A3E45,stroke-width:1px;
-
-    class Q,D io;
-    class G1,CA,G2,G3,OG gate;
-    class RW,PL,GEN,VF llm;
-    class RT,TK search;
-    class X1,X2,X3,X4,X5,X6 stop;
+    ST --> OG{⑩ 출력 가드레일<br/>금칙어 · 답변 측만}
+    X5 --> OG
+    OG -->|적중| X6[고정 거절로 교체]
+    OG --> RC[⑪ 기록 · 캐시 적재<br/>Langfuse · rag_runs · 대화 저장]
+    X6 --> RC
+    RC --> D([답변 · 출처 · 첨부 · done])
 ```
 
-> 보라색은 LLM 호출이 포함된 단계, 초록색은 검색 단계, 주황색은 판정 단계입니다. 종료 분기(회색)는 해당 지점에서 응답이 확정되며, 모든 분기가 동일한 SSE `done` 이벤트로 전달됩니다. 후보 수·근거 수 및 각 임계값은 문서화된 기본값이며, 관리자 콘솔에서 변경할 수 있습니다.
+> 마름모는 판정 단계, 「LLM 1콜」 표기는 해당 단계가 LLM을 호출함을 뜻합니다. 정상 경로의 LLM 호출은 **3회**(질의 정리 · 플래너 · 사후 검증)이며 생성 모델 호출은 별도입니다. 종료 분기는 해당 지점에서 응답이 확정되며, 모든 분기가 동일한 SSE `done` 이벤트로 전달되고 기록 단계를 거칩니다. 후보 수·근거 수 및 각 임계값은 문서화된 기본값이며, 관리자 콘솔에서 변경할 수 있습니다.
 
 ### 조기 종료 지점
 
@@ -93,25 +92,20 @@ Gate 1과 Gate 2는 **정밀도 우선**으로 설계되어 있습니다. 범위
 ```mermaid
 flowchart LR
     W[KDIC 웹 문서<br/>FAQ · 안내문 · 표 · 첨부]
-    W --> S1[수집]
-    S1 --> S2[변환<br/>본문 · 표 · 링크 파싱]
-    S2 --> S3[청킹<br/>구조 인식]
-    S3 --> S4[검증]
-    S4 --> S5[게이트<br/>홀드아웃 평가]
-    S5 --> S6[색인]
-    S6 --> S7[반영<br/>활성 버전 교체]
+    W --> S1[① 수집]
+    S1 --> S2[② 변환<br/>본문 · 표 · 링크 파싱]
+    S2 --> S3[③ 청킹<br/>구조 인식 · 제목·업무 프리픽스]
+    S3 --> S4[④ 검증<br/>청크 정합성]
+    S4 --> S5{⑤ 색인 게이트<br/>홀드아웃 검색 평가}
+    S5 -->|통과| S6[⑥ 색인<br/>bge-m3-ko · 1024차원]
+    S5 -->|기준 미달| WN[경고 기록 후 진행]
+    WN --> S6
+    S6 --> S7[⑦ 반영<br/>활성 버전 교체 · 질의 캐시 무효화]
     S7 -. 본문 해시 대조로 변경 감지 .-> W
+    RB[롤백<br/>직전 통과 스냅샷 · 게이트 생략] -.-> S7
 
     DB[(Supabase PostgreSQL<br/>documents · document_chunks<br/>pgvector 임베딩)]
     S6 --- DB
-
-    classDef source fill:#E8F1FF,stroke:#4C82D8,color:#17365D,stroke-width:2px;
-    classDef step fill:#F0E8FF,stroke:#7D5AC8,color:#34205F,stroke-width:2px;
-    classDef store fill:#E4F7EC,stroke:#2F9B61,color:#163C29,stroke-width:2px;
-
-    class W source;
-    class S1,S2,S3,S4,S5,S6,S7 step;
-    class DB store;
 ```
 
 이 7단계는 관리자 화면의 진행 표시와 동일한 명칭이며, 재수집·재색인 작업이 이 순서대로 실행됩니다.
@@ -127,17 +121,13 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    OB[관측<br/>대화 로그 · 피드백 · trace] --> DX[진단<br/>실패 질의 · 근거 미사용]
-    DX --> DR[초안<br/>지식 데이터 · RAG 파라미터 · 프롬프트]
-    DR --> EV[평가<br/>홀드아웃 A/B · 게이트 기준]
-    EV --> AP[반영<br/>버전 기록 · 롤백 가능]
+    OB[① 관측<br/>대화 로그 · 피드백 · Langfuse trace] --> DX[② 진단<br/>실패 질의 · 근거 미사용 · 게이트 차단]
+    DX --> DR[③ 초안<br/>지식 데이터 · RAG 파라미터 · 프롬프트 · 금칙어]
+    DR --> EV[④ 평가<br/>held-out 세트 · A/B 비교]
+    EV --> GT{⑤ 반영 게이트<br/>정확도@5 ≥ 0.92 · MRR ≥ 0.80<br/>성공률 ≥ 99.5% · 응답 ≤ 10s}
+    GT -->|기준 미달| DR
+    GT -->|통과| AP[⑥ 게시<br/>버전 기록 · 롤백 가능]
     AP --> OB
-
-    classDef eval fill:#E8F1FF,stroke:#4C82D8,color:#17365D,stroke-width:2px;
-    classDef ops fill:#E4F7EC,stroke:#2F9B61,color:#163C29,stroke-width:2px;
-
-    class OB,DX eval;
-    class DR,EV,AP ops;
 ```
 
 파라미터·프롬프트·금칙어는 모두 **초안 → 평가 → 게시 → 롤백** 흐름을 거칩니다. 운영에 즉시 반영되는 값은 없습니다.
