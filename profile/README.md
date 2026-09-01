@@ -50,10 +50,22 @@ KDIC 웹사이트의 FAQ·안내문·표·첨부파일을 구조를 유지한 �
 
 <br>
 
+## 시스템 아키텍처
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/yesom24_system_architecture_dark.png">
+  <img src="assets/yesom24_system_architecture.png" alt="예솜24 RAG 플랫폼 시스템 아키텍처 — 클라이언트, 단일 프로세스 앱 서버(FastAPI · RAG 서비스 · 워커 · 임베딩 모델), Supabase 한 DB, 외부 LLM·관측·원천 사이트" width="100%">
+</picture>
+
+<sub>현재 구현 기준 2026-09-01 · 코드·DB 실측으로 대조. 코드와 실행 방법은 <a href="https://github.com/likelion-8/kdic-rag-chatbot">likelion-8/kdic-rag-chatbot</a> README 의 「저장소 지도 · 바로 띄우기」에 있습니다.</sub>
+
+<br>
+
 ## 목차
 
 |  | 문서 | 내용 |
 |:--:|---|---|
+| `00` | **[시스템 아키텍처](#시스템-아키텍처)** | 영역 · 구성요소 · 호출 관계 한 장 |
 | `01` | **[답변 파이프라인](#답변-파이프라인)** | 질문 수신부터 SSE `done`까지 11단계 · 게이트 3중 구성 |
 | `02` | **[조기 종료 지점](#조기-종료-지점)** | 6개 종료 분기와 각 지점의 누적 LLM 호출 |
 | `03` | **[질의 전처리](#질의-전처리)** | 멀티턴 문맥 해소와 업무 되묻기 판정 |
